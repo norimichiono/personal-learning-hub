@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Bilingual interactive digital textbook and learning hub">
+  <title>Personal Learning Hub / パーソナル学習ハブ</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">PLH</div>
+        <div>
+          <strong>Personal Learning Hub</strong>
+          <small>パーソナル学習ハブ</small>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <button class="nav-btn active" data-view="home"><span>⌂</span><span>Home<small>ホーム</small></span></button>
+        <button class="nav-btn" data-view="learn"><span>▤</span><span>Learn<small>学ぶ</small></span></button>
+        <button class="nav-btn" data-view="quiz"><span>✓</span><span>Quiz<small>クイズ</small></span></button>
+        <button class="nav-btn" data-view="glossary"><span>⌕</span><span>Glossary<small>用語集</small></span></button>
+        <button class="nav-btn" data-view="progress"><span>◔</span><span>Progress<small>進捗</small></span></button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <small>Current Track / 現在のトラック</small>
+        <strong>Fusion / 経営企画 Preparation</strong>
+        <small>V1 Complete · Local-first / ローカル保存</small>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button class="menu-btn" id="menuBtn" aria-label="Open menu">☰</button>
+        <div class="topbar-copy">
+          <h1 id="pageTitle">Home / ホーム</h1>
+          <p id="pageSubtitle">Continue where you left off. / 前回の続きから学習できます。</p>
+        </div>
+        <div class="top-actions">
+          <button class="quick-search" id="globalSearchBtn" aria-label="Search lessons and glossary">
+            <span>⌕ Search / 検索</span><kbd>Ctrl K</kbd>
+          </button>
+          <div class="pill" id="reviewPill">Review due / 復習: 0</div>
+        </div>
+      </header>
+      <section class="page" id="app"></section>
+    </main>
+  </div>
+
+  <div class="search-overlay" id="searchOverlay" hidden>
+    <div class="search-backdrop" data-close-search></div>
+    <section class="search-dialog paper" role="dialog" aria-modal="true" aria-labelledby="globalSearchTitle">
+      <div class="search-dialog-head">
+        <div>
+          <strong id="globalSearchTitle">Search Learning Hub / 学習ハブを検索</strong>
+          <small>Lessons + glossary + your notes / レッスン＋用語集＋自分のメモ</small>
+        </div>
+        <button class="icon-btn" id="closeSearch" aria-label="Close search">×</button>
+      </div>
+      <input class="search global-search-input" id="globalSearchInput" type="search" autocomplete="off"
+        placeholder="Search ROIC, 意思決定, CAC, Waterless...">
+      <div class="global-results" id="globalSearchResults"></div>
+      <div class="search-hint"><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>Esc</kbd> close</div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast" aria-live="polite"></div>
+  <script src="content.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
