@@ -17,7 +17,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCwG1bWcpLqDGCQerMvUGyGWmffFGedIVrc",
+  apiKey: "AIzaSyCwG1bWcpLqDGCQerMvUGyGWmfFGedIVrc",
   authDomain: "personal-learning-hub-24ff9.firebaseapp.com",
   projectId: "personal-learning-hub-24ff9",
   storageBucket: "personal-learning-hub-24ff9.firebasestorage.app",
