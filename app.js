@@ -177,10 +177,14 @@ function save(){
   maybeDailySnapshot();
   S.stateVersion=STATE_VERSION;
   S.updatedAt=new Date().toISOString();
-  try{localStorage.setItem(KEY,JSON.stringify(S))}
+  let saved=false;
+  try{localStorage.setItem(KEY,JSON.stringify(S));saved=true}
   catch{show("Could not save locally / ローカル保存に失敗しました")}
   applyReadingPrefs();
   updatePill();
+  if(saved){
+    try{window.dispatchEvent(new CustomEvent("plh:state-saved",{detail:{state:clone(S),updatedAt:S.updatedAt}}))}catch{}
+  }
 }
 
 function storageBytes(key=KEY){
@@ -1211,6 +1215,29 @@ window.addEventListener("beforeunload",()=>{
     S.stateVersion=STATE_VERSION;S.updatedAt=new Date().toISOString();localStorage.setItem(KEY,JSON.stringify(S));
   }catch{}
 });
+
+
+/* ---------- Public bridge for optional cloud sync ---------- */
+window.PLH_APP={
+  stateKey:KEY,
+  stateVersion:STATE_VERSION,
+  getState:()=>clone(S),
+  getStateHealth:()=>stateHealth(),
+  createSnapshot:(reason="cloud-manual")=>writeSnapshot(S,reason),
+  replaceState:(raw,reason="cloud-reconcile")=>{
+    try{
+      writeSnapshot(S,`before-${reason}`);
+      S=normalizeState(raw);
+      if(!S.updatedAt)S.updatedAt=new Date().toISOString();
+      activeQuiz=null;answered=false;quizSession=null;
+      localStorage.setItem(KEY,JSON.stringify(S));
+      applyReadingPrefs();updatePill();render();
+      show("Cloud state loaded / クラウドの進捗を読み込みました");
+      return true;
+    }catch{return false}
+  },
+  showMessage:(message)=>show(message)
+};
 
 [title.textContent,subtitle.textContent]=startTitles[S.view]||startTitles.home;
 save();render();

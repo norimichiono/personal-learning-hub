@@ -186,3 +186,18 @@ V1 remains intentionally free of:
 - collaboration/workspace infrastructure
 
 Those would increase complexity without improving the current learning objective enough to justify them.
+
+
+## Online / Cross-device architecture
+
+The V1 online build uses:
+
+- GitHub public repository — source/version history
+- GitHub Pages — static site hosting
+- Firebase Authentication — Google sign-in
+- Cloud Firestore — private per-user learning-state sync
+- browser localStorage — immediate local/offline copy and recovery snapshots
+
+The public learning content remains in `content.js`. Personal state is not committed to GitHub; after Google sign-in it is written only to the authenticated user's Firestore path under `/users/{uid}/state/current`.
+
+Cloud sync is deliberately additive. The Hub still works without Firebase connectivity, and JSON backup/import remains the portable recovery mechanism.
