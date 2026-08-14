@@ -54,7 +54,7 @@ const base={
 };
 
 let S=load();
-let activeQuiz=null,answered=false,quizSession=null,singleQuizReturnLesson=false;
+let activeQuiz=null,answered=false,quizSession=null,singleQuizReturnLesson=false,lastAnswerUndo=null;
 let noteTimer=null,applicationTimer=null,uiSaveTimer=null;
 let glossaryLimit=60;
 let globalSearchItems=[],globalSearchIndex=0;
@@ -301,7 +301,7 @@ function setView(v){
 }
 
 function openQuizHub(){
-  activeQuiz=null;answered=false;quizSession=null;singleQuizReturnLesson=false;
+  activeQuiz=null;answered=false;quizSession=null;singleQuizReturnLesson=false;lastAnswerUndo=null;
   setView("quiz");
 }
 
@@ -804,7 +804,7 @@ function startQuizSession(mode,ids,titleEn,titleJa,opts={}){
     mode,titleEn,titleJa,baseQueue:[...baseQueue],queue:[...baseQueue],index:0,correct:0,answers:[],retryAdded:[],startedAt:new Date().toISOString(),done:false,
     assessment:Boolean(opts.assessment),deferFeedback:Boolean(opts.deferFeedback),allowRetry:opts.allowRetry!==false,chapterId:opts.chapterId||null
   };
-  activeQuiz=quizSession.queue[0];answered=false;singleQuizReturnLesson=false;
+  activeQuiz=quizSession.queue[0];answered=false;singleQuizReturnLesson=false;lastAnswerUndo=null;
   setView("quiz");
 }
 function startSmartReview(){startQuizSession("review",reviewQueue(),"Adaptive Smart Review","適応型スマート復習")}
@@ -835,6 +835,7 @@ function finishQuizSession(){
   save();
 }
 function nextQuestion(){
+  lastAnswerUndo=null;
   if(quizSession){
     quizSession.index++;
     if(quizSession.index>=quizSession.queue.length){finishQuizSession();renderQuiz();return}
@@ -891,20 +892,43 @@ function renderQuizQuestion(){
     <div class="answers">${q.options.map((o,i)=>`<button class="answer" data-opt="${esc(o.id)}"><strong>${i+1}.</strong> ${esc(o.en)}<br><span class="small">${esc(o.ja)}</span></button>`).join("")}</div>
     <div id="feedback"></div>
     <div class="btn-row">
+      <button class="secondary misclick-btn" id="undoMisclick" style="display:none">Misclick — undo / 誤操作を取り消す</button>
       <button class="secondary" id="nextQ" style="display:none">${quizSession?"Next question / 次の問題":"Finish / 終了"}</button>
       <button class="text-btn" id="backQuizHub">Quiz menu / クイズメニュー</button>
       ${singleQuizReturnLesson?`<button class="text-btn" id="backLesson">Back to lesson / レッスンに戻る</button>`:""}
     </div>
+    <div class="misclick-note" id="misclickNote" style="display:none">Use only for an accidental tap. The answer is removed completely and does not affect accuracy, mastery, review timing, or completion. / 誤タップ時のみ使用してください。回答は完全に取り消され、正答率・習熟度・復習時期・完了判定には影響しません。</div>
     <div class="keyboard-note"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> answer · <kbd>Enter</kbd> next${assessment?" · feedback at end / 解説は終了後":""}</div>
   </section>`;
   document.querySelectorAll("[data-opt]").forEach(b=>b.onclick=()=>answer(q,b.dataset.opt));
   document.getElementById("nextQ").onclick=nextQuestion;
+  document.getElementById("undoMisclick").onclick=undoMisclick;
   document.getElementById("backQuizHub").onclick=openQuizHub;
-  if(document.getElementById("backLesson"))document.getElementById("backLesson").onclick=()=>{activeQuiz=null;answered=false;quizSession=null;singleQuizReturnLesson=false;setView("learn")};
+  if(document.getElementById("backLesson"))document.getElementById("backLesson").onclick=()=>{activeQuiz=null;answered=false;quizSession=null;singleQuizReturnLesson=false;lastAnswerUndo=null;setView("learn")};
+}
+function undoMisclick(){
+  if(!answered||!lastAnswerUndo||lastAnswerUndo.quizId!==activeQuiz)return;
+  const snap=lastAnswerUndo;
+  lastAnswerUndo=null;
+  S=normalizeState(snap.state);
+  quizSession=snap.quizSession?clone(snap.quizSession):null;
+  activeQuiz=snap.activeQuiz;
+  singleQuizReturnLesson=snap.singleQuizReturnLesson;
+  answered=false;
+  save();
+  renderQuiz();
+  show("Misclick removed — answer not counted / 誤操作を取り消しました。回答にはカウントされません");
 }
 function answer(q,id){
   if(answered)return;
   const chosen=q.options.find(o=>o.id===id);if(!chosen)return;
+  lastAnswerUndo={
+    quizId:q.id,
+    state:clone(S),
+    quizSession:quizSession?clone(quizSession):null,
+    activeQuiz,
+    singleQuizReturnLesson
+  };
   answered=true;
   const assessment=Boolean(quizSession?.assessment);
   document.querySelectorAll("[data-opt]").forEach(b=>{
@@ -940,6 +964,8 @@ function answer(q,id){
   }else{
     document.getElementById("feedback").innerHTML=`<div class="feedback ${chosen.correct?"good":"bad"}"><strong>${chosen.correct?"Correct / 正解":"Not quite / もう一度確認"}</strong><br>${esc(chosen.whyEn)}<br>${esc(chosen.whyJa)}${mastery(q.concept).en==="Strong"&&!mastery(q.concept).applied?`<div class="small feedback-note">To reach Mastered, add applied practice in the linked lesson and build correct evidence across multiple days. / Masteredには関連レッスンの応用練習と複数日にわたる正答Evidenceが必要です。</div>`:""}</div>`;
   }
+  document.getElementById("undoMisclick").style.display="inline-block";
+  document.getElementById("misclickNote").style.display="block";
   document.getElementById("nextQ").style.display="inline-block";
 }
 function assessmentBand(p){if(p>=85)return["Strong","強い"];if(p>=70)return["Developing","発展中"];if(p>=55)return["Needs targeted review","重点復習"];return["Rebuild foundation","基礎を再構築"]}
