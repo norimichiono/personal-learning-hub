@@ -34,6 +34,7 @@ const base={
   sessions:[],
   quizHistory:[],
   assessments:[],
+  activeAssessment:null,
   recentLessons:[],
   savedTerms:[],
   termFocus:null,
@@ -104,6 +105,7 @@ function normalizeState(raw={}){
   if(!Array.isArray(s.sessions))s.sessions=[];
   if(!Array.isArray(s.quizHistory))s.quizHistory=[];
   if(!Array.isArray(s.assessments))s.assessments=[];
+  if(!s.activeAssessment||typeof s.activeAssessment!=="object"||Array.isArray(s.activeAssessment))s.activeAssessment=null;
   if(!Array.isArray(s.recentLessons))s.recentLessons=[];
   if(!Array.isArray(s.savedTerms))s.savedTerms=[];
   if(s.ui.tocOpen!==null&&!Array.isArray(s.ui.tocOpen))s.ui.tocOpen=null;
@@ -301,8 +303,23 @@ function setView(v){
 }
 
 function openQuizHub(){
+  if(quizSession?.assessment&&!quizSession.done&&!answered){S.activeAssessment=clone(quizSession)}
   activeQuiz=null;answered=false;quizSession=null;singleQuizReturnLesson=false;lastAnswerUndo=null;
   setView("quiz");
+}
+function resumeAssessment(){
+  const draft=S.activeAssessment;
+  if(!draft||!Array.isArray(draft.queue)||!draft.queue.length){S.activeAssessment=null;save();renderQuiz();return}
+  quizSession=clone(draft);
+  quizSession.done=false;
+  if(quizSession.index>=quizSession.queue.length){S.activeAssessment=null;finishQuizSession();renderQuiz();return}
+  activeQuiz=quizSession.queue[quizSession.index];answered=false;singleQuizReturnLesson=false;lastAnswerUndo=null;
+  setView("quiz");
+}
+function abandonAssessment(){
+  if(!S.activeAssessment)return;
+  if(!confirm("Abandon this paused assessment? Its partial answers will not be saved as an assessment result.\n\n中断中の確認テストを破棄しますか？ 未完了の回答は確認テスト結果として保存されません。"))return;
+  S.activeAssessment=null;save();renderQuiz();show("Paused assessment discarded / 中断中の確認テストを破棄しました");
 }
 
 function pct(){return Math.round(S.completed.filter(id=>LESSON_BY_ID.has(id)).length/ALL_LESSONS.length*100)||0}
@@ -310,7 +327,7 @@ function stats(){
   const a=Object.entries(S.attempts).filter(([id])=>QUIZ_BY_ID.has(id)).map(([,x])=>x);
   let total=0,correct=0;
   a.forEach(x=>{total+=x.total||0;correct+=x.correct||0});
-  const history=S.quizHistory.filter(x=>QUIZ_BY_ID.has(x.quizId));
+  const history=S.quizHistory.filter(x=>QUIZ_BY_ID.has(x.quizId)&&!x.assessment);
   const recent=history.slice(-30),first=history.filter(x=>x.firstPresentation!==false);
   const accuracy=total?Math.round(correct/total*100):0;
   const recentAccuracy=recent.length?Math.round(recent.filter(x=>x.correct).length/recent.length*100):accuracy;
@@ -331,7 +348,7 @@ function mastery(id){
   let en="New",ja="未学習";
   if(r.total){en="Learning";ja="学習中"}
   if((r.score||0)>=2){en="Developing";ja="発展中"}
-  if((r.score||0)>=4){en="Strong";ja="定着"}
+  if((r.score||0)>=4&&(r.correct||0)>=3&&correctDates.length>=2){en="Strong";ja="定着"}
   if((r.score||0)>=6&&(r.correct||0)>=4&&correctDates.length>=2&&applied){en="Mastered";ja="習得"}
   return{...r,correctDates,applied,en,ja};
 }
@@ -348,7 +365,7 @@ function weakConcepts(){
     return m.total>0&&!["Strong","Mastered"].includes(m.en);
   });
 }
-function conceptHistory(id){return S.quizHistory.filter(x=>x.concept===id)}
+function conceptHistory(id){return S.quizHistory.filter(x=>x.concept===id&&!x.assessment)}
 function conceptReadiness(id){
   const m=mastery(id),hist=conceptHistory(id),recent=hist.slice(-5);
   if(!m.total&&!hist.length)return 0;
@@ -383,7 +400,7 @@ function chapterLearningReadiness(c){
   const lessonIds=c.lessons.map(l=>l.id),quizIds=c.lessons.map(l=>l.quizId).filter(id=>QUIZ_BY_ID.has(id));
   const concepts=uniq(quizIds.map(id=>quiz(id)?.concept).filter(Boolean));
   const coverage=lessonIds.length?lessonIds.filter(id=>S.completed.includes(id)).length/lessonIds.length:0;
-  const firstHist=S.quizHistory.filter(x=>quizIds.includes(x.quizId)&&x.firstPresentation!==false);
+  const firstHist=S.quizHistory.filter(x=>quizIds.includes(x.quizId)&&!x.assessment&&x.firstPresentation!==false);
   const attemptedIds=firstHist.length?uniq(firstHist.map(x=>x.quizId)):quizIds.filter(id=>(S.attempts[id]?.total||0)>0);
   let recallBase=0;
   if(firstHist.length)recallBase=firstHist.filter(x=>x.correct).length/firstHist.length;
@@ -778,9 +795,9 @@ function reviewQueue(){
   return queue.length?queue:[lesson(S.lesson).quizId];
 }
 function missedQueue(){
-  const fromHistory=new Set(S.quizHistory.filter(x=>x&&!x.correct).map(x=>x.quizId));
-  D.quizzes.forEach(q=>{const a=S.attempts[q.id];if(a&&(a.lastCorrect===false||(a.total||0)>(a.correct||0)))fromHistory.add(q.id)});
-  return [...fromHistory].filter(id=>QUIZ_BY_ID.has(id));
+  const latest=new Map();
+  S.quizHistory.filter(x=>x&&QUIZ_BY_ID.has(x.quizId)&&!x.assessment).forEach(x=>latest.set(x.quizId,x));
+  return [...latest.entries()].filter(([,x])=>!x.correct).map(([id])=>id);
 }
 function currentChapterQuizIds(){
   const c=currentChapter();
@@ -799,12 +816,17 @@ function balancedTrackAssessmentIds(){
 function startQuizSession(mode,ids,titleEn,titleJa,opts={}){
   const baseQueue=uniq(ids.filter(id=>QUIZ_BY_ID.has(id)));
   if(!baseQueue.length){show("No questions available / 問題がありません");return}
+  if(opts.assessment&&S.activeAssessment){
+    if(!confirm("A paused assessment already exists. Replace it with a new assessment?\n\n中断中の確認テストがあります。新しい確認テストに置き換えますか？"))return;
+    S.activeAssessment=null;
+  }
   quizSession={
     id:`qs-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
     mode,titleEn,titleJa,baseQueue:[...baseQueue],queue:[...baseQueue],index:0,correct:0,answers:[],retryAdded:[],startedAt:new Date().toISOString(),done:false,
     assessment:Boolean(opts.assessment),deferFeedback:Boolean(opts.deferFeedback),allowRetry:opts.allowRetry!==false,chapterId:opts.chapterId||null
   };
   activeQuiz=quizSession.queue[0];answered=false;singleQuizReturnLesson=false;lastAnswerUndo=null;
+  if(quizSession.assessment)S.activeAssessment=clone(quizSession);
   setView("quiz");
 }
 function startSmartReview(){startQuizSession("review",reviewQueue(),"Adaptive Smart Review","適応型スマート復習")}
@@ -818,6 +840,7 @@ function startTrackAssessment(){
 function finishQuizSession(){
   if(!quizSession||quizSession.done)return;
   quizSession.done=true;activeQuiz=null;
+  if(quizSession.assessment)S.activeAssessment=null;
   const lastResult=new Map();quizSession.answers.forEach(a=>lastResult.set(a.quizId,a.correct));
   const originalAnswers=quizSession.baseQueue.map(id=>quizSession.answers.find(a=>a.quizId===id)).filter(Boolean);
   const assessmentCorrect=originalAnswers.filter(a=>a.correct).length;
@@ -839,7 +862,8 @@ function nextQuestion(){
   if(quizSession){
     quizSession.index++;
     if(quizSession.index>=quizSession.queue.length){finishQuizSession();renderQuiz();return}
-    activeQuiz=quizSession.queue[quizSession.index];answered=false;renderQuiz();window.scrollTo({top:0,behavior:"smooth"});return;
+    if(quizSession.assessment)S.activeAssessment=clone(quizSession);
+    activeQuiz=quizSession.queue[quizSession.index];answered=false;save();renderQuiz();window.scrollTo({top:0,behavior:"smooth"});return;
   }
   activeQuiz=null;answered=false;
   if(singleQuizReturnLesson){singleQuizReturnLesson=false;setView("learn")}else renderQuiz();
@@ -851,8 +875,9 @@ function renderQuiz(){
 }
 function renderQuizHub(){
   const dueCount=due().length,weakCount=weakConcepts().length,missed=missedQueue().length,c=currentChapter();
-  const latestAssessment=[...S.assessments].reverse()[0];
+  const latestAssessment=[...S.assessments].reverse()[0],paused=S.activeAssessment;
   app.innerHTML=`
+  ${paused?`<section class="paper quiz-hub assessment-hub paused-assessment"><div class="section-head"><h2>Paused Assessment / 中断中の確認テスト</h2><p>Continue from the next unanswered question, or discard the incomplete attempt. / 次の未回答問題から再開するか、未完了テストを破棄できます。</p></div><div class="latest-assessment"><strong>${esc(paused.titleEn)} / ${esc(paused.titleJa)}</strong><span>${Math.min(paused.index+1,paused.queue.length)} / ${paused.queue.length}</span></div><div class="btn-row"><button class="primary" id="resumeAssessment">Resume / 再開</button><button class="secondary" id="abandonAssessment">Abandon / 破棄</button></div></section>`:""}
   <section class="paper quiz-hub">
     <div class="section-head"><h2>Practice / 練習</h2><p>Immediate explanations. Short sessions selected by review need. / すぐに解説。復習必要度に基づく短いセッション。</p></div>
     <div class="quiz-mode-grid">
@@ -873,6 +898,8 @@ function renderQuizHub(){
     </div>
     ${latestAssessment?`<div class="latest-assessment"><small>Latest assessment / 最新確認</small><strong>${esc(latestAssessment.titleEn)} / ${esc(latestAssessment.titleJa)}</strong><span>${latestAssessment.correct}/${latestAssessment.total} · ${Math.round(latestAssessment.correct/Math.max(1,latestAssessment.total)*100)}% · ${dateLabel(latestAssessment.completedAt)}</span></div>`:""}
   </section>`;
+  if(document.getElementById("resumeAssessment"))document.getElementById("resumeAssessment").onclick=resumeAssessment;
+  if(document.getElementById("abandonAssessment"))document.getElementById("abandonAssessment").onclick=abandonAssessment;
   document.getElementById("smartReview").onclick=startSmartReview;
   document.getElementById("chapterQuiz").onclick=()=>startQuizSession("chapter",shuffle(currentChapterQuizIds()).slice(0,10),`Chapter Practice: ${c.titleEn}`,`章練習：${c.titleJa}`);
   if(missed)document.getElementById("missedQuiz").onclick=()=>startQuizSession("missed",shuffle(missedQueue()).slice(0,10),"Retry Missed","間違い直し");
@@ -882,19 +909,19 @@ function renderQuizHub(){
 }
 function renderQuizQuestion(){
   const q=quiz(activeQuiz);if(!q){activeQuiz=null;return renderQuiz()}
-  const g=term(q.concept),m=mastery(q.concept),assessment=Boolean(quizSession?.assessment);
+  const g=term(q.concept),m=mastery(q.concept),assessment=Boolean(quizSession?.assessment),renderedOptions=shuffle(q.options);
   const progress=quizSession?`${quizSession.index+1} / ${quizSession.queue.length}`:"Checkpoint / チェック";
   app.innerHTML=`
   <section class="paper quiz ${assessment?"assessment-mode":""}">
     <div class="quiz-meta"><span>${esc(g?.en||q.concept)} / ${esc(g?.ja||"")}</span><span>${progress} · ${m.en} / ${m.ja}</span></div>
     ${quizSession?`<div class="session-label">${esc(quizSession.titleEn)} / ${esc(quizSession.titleJa)}${assessment?" · Assessment / 確認テスト":""}</div>`:""}
     <div class="question">${esc(q.qEn)}<span class="jp">${esc(q.qJa)}</span></div>
-    <div class="answers">${q.options.map((o,i)=>`<button class="answer" data-opt="${esc(o.id)}"><strong>${i+1}.</strong> ${esc(o.en)}<br><span class="small">${esc(o.ja)}</span></button>`).join("")}</div>
+    <div class="answers">${renderedOptions.map((o,i)=>`<button class="answer" data-opt="${esc(o.id)}"><strong>${i+1}.</strong> ${esc(o.en)}<br><span class="small">${esc(o.ja)}</span></button>`).join("")}</div>
     <div id="feedback"></div>
     <div class="btn-row">
       <button class="secondary misclick-btn" id="undoMisclick" style="display:none">Misclick — undo / 誤操作を取り消す</button>
       <button class="secondary" id="nextQ" style="display:none">${quizSession?"Next question / 次の問題":"Finish / 終了"}</button>
-      <button class="text-btn" id="backQuizHub">Quiz menu / クイズメニュー</button>
+      <button class="text-btn" id="backQuizHub">${assessment?"Pause assessment / 確認テストを中断":"Quiz menu / クイズメニュー"}</button>
       ${singleQuizReturnLesson?`<button class="text-btn" id="backLesson">Back to lesson / レッスンに戻る</button>`:""}
     </div>
     <div class="misclick-note" id="misclickNote" style="display:none">Use only for an accidental tap. The answer is removed completely and does not affect accuracy, mastery, review timing, or completion. / 誤タップ時のみ使用してください。回答は完全に取り消され、正答率・習熟度・復習時期・完了判定には影響しません。</div>
@@ -938,17 +965,19 @@ function answer(q,id){
     if(b.dataset.opt===id&&!o.correct)b.classList.add("incorrect");
   });
 
-  const a=S.attempts[q.id]||{total:0,correct:0,lastCorrect:null,lastAt:null};
-  a.total++;if(chosen.correct)a.correct++;a.lastCorrect=Boolean(chosen.correct);a.lastAt=new Date().toISOString();S.attempts[q.id]=a;
+  if(!assessment){
+    const a=S.attempts[q.id]||{total:0,correct:0,lastCorrect:null,lastAt:null};
+    a.total++;if(chosen.correct)a.correct++;a.lastCorrect=Boolean(chosen.correct);a.lastAt=new Date().toISOString();S.attempts[q.id]=a;
 
-  const now=new Date(),r=S.mastery[q.concept]||{score:0,total:0,correct:0,next:null,correctDates:[]};
-  if(!Array.isArray(r.correctDates))r.correctDates=[];r.total=(r.total||0)+1;
-  if(chosen.correct){r.correct=(r.correct||0)+1;r.score=Math.min(7,(r.score||0)+1);if(!r.correctDates.includes(todayKey()))r.correctDates.push(todayKey())}
-  else r.score=Math.max(0,(r.score||0)-1);
-  const days=!chosen.correct?1:r.score<2?1:r.score<4?3:r.score<6?7:21,n=new Date(now);n.setDate(n.getDate()+days);r.next=n.toISOString();S.mastery[q.concept]=r;
+    const now=new Date(),r=S.mastery[q.concept]||{score:0,total:0,correct:0,next:null,correctDates:[]};
+    if(!Array.isArray(r.correctDates))r.correctDates=[];r.total=(r.total||0)+1;
+    if(chosen.correct){r.correct=(r.correct||0)+1;r.score=Math.min(7,(r.score||0)+1);if(!r.correctDates.includes(todayKey()))r.correctDates.push(todayKey())}
+    else r.score=Math.max(0,(r.score||0)-1);
+    const days=!chosen.correct?1:r.score<2?1:r.score<4?3:r.score<6?7:21,n=new Date(now);n.setDate(n.getDate()+days);r.next=n.toISOString();S.mastery[q.concept]=r;
+  }
 
-  const l=ALL_LESSONS.find(x=>x.quizId===q.id);if(chosen.correct&&l)markComplete(l.id,true);
-  const firstPresentation=quizSession?!quizSession.answers.some(x=>x.quizId===q.id):true;
+  const priorPresentation=S.quizHistory.some(x=>x.quizId===q.id&&!x.assessment);
+  const firstPresentation=!assessment&&!priorPresentation;
   const hist={quizId:q.id,concept:q.concept,selectedId:id,correct:Boolean(chosen.correct),at:new Date().toISOString(),mode:quizSession?.mode||"checkpoint",sessionId:quizSession?.id||null,firstPresentation,assessment};
   S.quizHistory.push(hist);S.quizHistory=S.quizHistory.slice(-2000);
 
@@ -956,6 +985,7 @@ function answer(q,id){
     if(chosen.correct)quizSession.correct++;
     quizSession.answers.push({quizId:q.id,concept:q.concept,selectedId:id,correct:Boolean(chosen.correct)});
     if(!assessment&&quizSession.allowRetry&&!chosen.correct&&!quizSession.retryAdded.includes(q.id)){quizSession.retryAdded.push(q.id);quizSession.queue.push(q.id)}
+    if(assessment){const draft=clone(quizSession);draft.index=Math.min(draft.queue.length,draft.index+1);S.activeAssessment=draft}
   }
   save();
 
@@ -975,7 +1005,7 @@ function renderQuizSummary(){
   const accuracy=total?Math.round(correct/total*100):0,band=assessmentBand(accuracy),practiceTarget=ALL_LESSONS.find(l=>l.quizId===wrong[0])||null;
   const details=s.assessment?s.baseQueue.map(id=>{
     const q=quiz(id),a=s.answers.find(x=>x.quizId===id),chosen=q?.options.find(o=>o.id===a?.selectedId),right=q?.options.find(o=>o.correct);
-    return `<div class="assessment-review-item ${a?.correct?"ok":"miss"}"><div class="assessment-review-head"><strong>${a?.correct?"✓":"×"} ${esc(q?.qEn||id)}</strong><span>${a?.correct?"Correct / 正解":"Review / 要復習"}</span></div><div class="small">${esc(q?.qJa||"")}</div><p><b>Your answer / あなたの回答:</b> ${esc(chosen?.en||"—")} / ${esc(chosen?.ja||"")}</p>${!a?.correct?`<p><b>Correct / 正解:</b> ${esc(right?.en||"")} / ${esc(right?.ja||"")}</p><p>${esc(right?.whyEn||"")}<br>${esc(right?.whyJa||"")}</p>`:""}</div>`;
+    return `<div class="assessment-review-item ${a?.correct?"ok":"miss"}"><div class="assessment-review-head"><strong>${a?.correct?"✓":"×"} ${esc(q?.qEn||id)}</strong><span>${a?.correct?"Correct / 正解":"Review / 要復習"}</span></div><div class="small">${esc(q?.qJa||"")}</div><p><b>Your answer / あなたの回答:</b> ${esc(chosen?.en||"—")} / ${esc(chosen?.ja||"")}</p>${!a?.correct?`<p><b>Correct / 正解:</b> ${esc(right?.en||"")} / ${esc(right?.ja||"")}</p>`:""}<p>${esc((a?.correct?chosen:right)?.whyEn||"")}<br>${esc((a?.correct?chosen:right)?.whyJa||"")}</p></div>`;
   }).join(""):"";
   app.innerHTML=`
   <section class="paper quiz summary-card ${s.assessment?"assessment-summary":""}">
@@ -1216,8 +1246,8 @@ document.addEventListener("keydown",e=>{
     const key=e.key.toLowerCase();
     const map={"1":0,"2":1,"3":2,"a":0,"b":1,"c":2};
     if(map[key]!==undefined&&!answered){
-      const q=quiz(activeQuiz),opt=q?.options[map[key]];
-      if(opt){e.preventDefault();answer(q,opt.id)}
+      const q=quiz(activeQuiz),buttons=[...document.querySelectorAll("[data-opt]")],btn=buttons[map[key]];
+      if(q&&btn){e.preventDefault();answer(q,btn.dataset.opt)}
     }else if((e.key==="Enter"||e.key==="ArrowRight")&&answered){
       const next=document.getElementById("nextQ");
       if(next&&next.offsetParent!==null){e.preventDefault();nextQuestion()}

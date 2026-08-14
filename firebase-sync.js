@@ -145,6 +145,61 @@ function stateBytes(s){
   try{return new TextEncoder().encode(text).length}catch{return text.length}
 }
 function stateRef(){return doc(db,"users",user.uid,"state","current")}
+function eventKey(x){return x?.id||[x?.quizId,x?.selectedId,x?.at,x?.mode,x?.sessionId,x?.completedAt].filter(Boolean).join("|")}
+function mergeEventArrays(a=[],b=[],limit=2000){
+  const m=new Map();
+  [...a,...b].filter(Boolean).forEach(x=>m.set(eventKey(x),x));
+  return [...m.values()].sort((x,y)=>Date.parse(x?.at||x?.completedAt||0)-Date.parse(y?.at||y?.completedAt||0)).slice(-limit);
+}
+function replayLearning(history=[]){
+  const attempts={},mastery={};
+  const seenQuiz=new Set();
+  history.filter(x=>x&&!x.assessment).sort((a,b)=>Date.parse(a.at||0)-Date.parse(b.at||0)).forEach(x=>{
+    x.firstPresentation=!seenQuiz.has(x.quizId);seenQuiz.add(x.quizId);
+    const a=attempts[x.quizId]||{total:0,correct:0,lastCorrect:null,lastAt:null};
+    a.total++;if(x.correct)a.correct++;a.lastCorrect=Boolean(x.correct);a.lastAt=x.at||new Date().toISOString();attempts[x.quizId]=a;
+    const r=mastery[x.concept]||{score:0,total:0,correct:0,next:null,correctDates:[]};
+    r.total++;if(x.correct){r.correct++;r.score=Math.min(7,r.score+1);const d=new Date(x.at||Date.now()),day=String(d.getFullYear())+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");if(!r.correctDates.includes(day))r.correctDates.push(day)}else r.score=Math.max(0,r.score-1);
+    const n=new Date(x.at||Date.now()),days=!x.correct?1:r.score<2?1:r.score<4?3:r.score<6?7:21;n.setDate(n.getDate()+days);r.next=n.toISOString();mastery[x.concept]=r;
+  });
+  return {attempts,mastery};
+}
+function mergeObjectByBase(localObj={},remoteObj={},localNewer=true){return localNewer?{...remoteObj,...localObj}:{...localObj,...remoteObj}}
+function mergeApplications(a={},b={}){
+  const out={...a};
+  for(const [k,v] of Object.entries(b||{})){
+    if(!out[k]){out[k]=v;continue}
+    const at=Date.parse(out[k]?.updatedAt||out[k]?.completedAt||0),bt=Date.parse(v?.updatedAt||v?.completedAt||0);
+    if(bt>at)out[k]=v;
+  }
+  return out;
+}
+function mergeRecent(a=[],b=[]){
+  const m=new Map();[...a,...b].filter(Boolean).forEach(x=>{const old=m.get(x.id);if(!old||Date.parse(x.at||0)>Date.parse(old.at||0))m.set(x.id,x)});
+  return [...m.values()].sort((x,y)=>Date.parse(x.at||0)-Date.parse(y.at||0)).slice(-20);
+}
+function mergeStates(local={},remote={}){
+  const lt=stateTime(local),rt=stateTime(remote),localNewer=lt>=rt,newer=localNewer?local:remote,older=localNewer?remote:local;
+  const merged={...older,...newer};
+  merged.completed=[...new Set([...(local.completed||[]),...(remote.completed||[])])];
+  merged.bookmarks=[...new Set([...(local.bookmarks||[]),...(remote.bookmarks||[])])];
+  merged.savedTerms=[...new Set([...(local.savedTerms||[]),...(remote.savedTerms||[])])];
+  merged.notes=mergeObjectByBase(local.notes||{},remote.notes||{},localNewer);
+  merged.applications=mergeApplications(local.applications||{},remote.applications||{});
+  merged.sessions=mergeEventArrays(local.sessions,remote.sessions,30);
+  merged.assessments=mergeEventArrays(local.assessments,remote.assessments,50);
+  merged.quizHistory=mergeEventArrays(local.quizHistory,remote.quizHistory,2000);
+  merged.recentLessons=mergeRecent(local.recentLessons,remote.recentLessons);
+  const replay=replayLearning(merged.quizHistory);
+  if(merged.quizHistory.length){merged.attempts=replay.attempts;merged.mastery=replay.mastery}
+  else{
+    merged.attempts=mergeObjectByBase(local.attempts||{},remote.attempts||{},localNewer);
+    merged.mastery=mergeObjectByBase(local.mastery||{},remote.mastery||{},localNewer);
+  }
+  merged.activeAssessment=newer.activeAssessment||older.activeAssessment||null;
+  merged.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();
+  return merged;
+}
 
 async function writeCloud(state,reason="auto"){
   if(!user||!navigator.onLine||!state)return false;
@@ -231,8 +286,12 @@ async function reconcile(reason="sign-in"){
       await applyRemote(remote,"cloud-first-load");
     }else if(localUseful&&!remoteUseful){
       await writeCloud(local,"local-wins");
-    }else if(remoteUseful&&localUseful&&remoteTime>localTime+1000){
-      await applyRemote(remote,"cloud-newer");
+    }else if(remoteUseful&&localUseful){
+      const merged=mergeStates(local,remote);
+      const localFp=fingerprint(local),remoteFp=fingerprint(remote),mergedFp=fingerprint(merged);
+      if(mergedFp!==localFp)await applyRemote(merged,"cloud-merged");
+      if(mergedFp!==remoteFp)await writeCloud(merged,"merged");
+      else{lastUploadedFingerprint=mergedFp;setStatus("synced","Synced / 同期済","Synced / 同期済み")}
     }else if(localTime>remoteTime+1000){
       await writeCloud(local,"local-newer");
     }else{
