@@ -40,6 +40,8 @@ const base={
   termFocus:null,
   ui:{
     tocOpen:null,
+    tocHidden:false,
+    sidebarCollapsed:false,
     learnSearch:"",
     bookmarksOnly:false,
     progressFilter:"attention",
@@ -65,6 +67,7 @@ const title=document.getElementById("pageTitle");
 const subtitle=document.getElementById("pageSubtitle");
 const pill=document.getElementById("reviewPill");
 const sidebar=document.getElementById("sidebar");
+const shell=document.querySelector(".app-shell");
 const toast=document.getElementById("toast");
 const nav=[...document.querySelectorAll(".nav-btn")];
 const searchOverlay=document.getElementById("searchOverlay");
@@ -109,6 +112,8 @@ function normalizeState(raw={}){
   if(!Array.isArray(s.recentLessons))s.recentLessons=[];
   if(!Array.isArray(s.savedTerms))s.savedTerms=[];
   if(s.ui.tocOpen!==null&&!Array.isArray(s.ui.tocOpen))s.ui.tocOpen=null;
+  if(typeof s.ui.tocHidden!=="boolean")s.ui.tocHidden=false;
+  if(typeof s.ui.sidebarCollapsed!=="boolean")s.ui.sidebarCollapsed=false;
   if(typeof s.ui.learnSearch!=="string")s.ui.learnSearch="";
   if(typeof s.ui.bookmarksOnly!=="boolean")s.ui.bookmarksOnly=false;
   if(typeof s.ui.progressSearch!=="string")s.ui.progressSearch="";
@@ -475,8 +480,9 @@ function recordRecentLesson(id){
 function notesCount(){return Object.values(S.notes).filter(v=>String(v||"").trim()).length}
 function applicationsCount(){return Object.values(S.applications).filter(v=>v&&v.completedAt&&String(v.text||"").trim().length>=40).length}
 function applyReadingPrefs(){
-  document.documentElement.dataset.readingSize=S.ui.readingSize||"normal";
-  document.documentElement.dataset.readingWidth=S.ui.readingWidth||"comfortable";
+  document.documentElement.dataset.readingSize="normal";
+  document.documentElement.dataset.readingWidth="wide";
+  if(shell)shell.classList.toggle("sidebar-collapsed",Boolean(S.ui.sidebarCollapsed));
 }
 function cycleReadingSize(delta){
   const levels=["small","normal","large"],i=levels.indexOf(S.ui.readingSize||"normal");
@@ -594,7 +600,7 @@ function renderLearn(){
   const formulaTerms=cur.glossary.map(term).filter(g=>g&&g.formula);
 
   app.innerHTML=`
-  <div class="learn-grid">
+  <div class="learn-grid ${S.ui.tocHidden?"toc-hidden":""}">
     <aside class="paper toc">
       <div class="toc-head">
         <div><h2>Table of Contents / 目次</h2><p>${esc(D.track.titleEn)}<br>${esc(D.track.titleJa)}</p></div>
@@ -620,11 +626,8 @@ function renderLearn(){
           <div class="small">Lesson ${idx+1} / ${ALL_LESSONS.length}${m?` · ${m.en} / ${m.ja}`:""}</div>
         </div>
         <div class="lesson-actions">
+          <button class="secondary compact-btn" id="toggleToc">${S.ui.tocHidden?"Show contents / 目次を表示":"Hide contents / 目次を隠す"}</button>
           <button class="secondary compact-btn ${S.ui.managementView?"active":""}" id="managementView">Executive Review / 経営前レビュー</button>
-          <button class="secondary compact-btn" id="textSmaller" title="Smaller text">A−</button>
-          <button class="secondary compact-btn" id="textLarger" title="Larger text">A+</button>
-          <button class="secondary compact-btn" id="widthToggle">${S.ui.readingWidth==="wide"?"Comfortable width / 標準幅":"Wide / 広く"}</button>
-          <button class="secondary compact-btn" id="printLesson">Print / 印刷</button>
           <button class="secondary compact-btn" id="bookmarkLesson">${S.bookmarks.includes(cur.id)?"★ Saved / 保存済み":"☆ Bookmark / 保存"}</button>
           <button class="secondary compact-btn" id="toggleComplete">${S.completed.includes(cur.id)?"✓ Completed / 完了":"Mark complete / 完了にする"}</button>
         </div>
@@ -704,11 +707,8 @@ function renderLearn(){
   document.querySelectorAll("[data-lesson]").forEach(b=>b.onclick=()=>openLessonId(b.dataset.lesson));
   document.querySelectorAll("[data-term]").forEach(b=>b.onclick=()=>openTermId(b.dataset.term));
 
+  document.getElementById("toggleToc").onclick=()=>{S.ui.tocHidden=!S.ui.tocHidden;save();renderLearn()};
   document.getElementById("managementView").onclick=()=>{S.ui.managementView=!S.ui.managementView;save();renderLearn()};
-  document.getElementById("textSmaller").onclick=()=>cycleReadingSize(-1);
-  document.getElementById("textLarger").onclick=()=>cycleReadingSize(1);
-  document.getElementById("widthToggle").onclick=toggleReadingWidth;
-  document.getElementById("printLesson").onclick=()=>window.print();
   document.getElementById("bookmarkLesson").onclick=()=>{toggleBookmark(cur.id);renderLearn()};
   document.getElementById("toggleComplete").onclick=()=>{markComplete(cur.id,!S.completed.includes(cur.id));renderLearn()};
 
@@ -1222,7 +1222,10 @@ function activateGlobalResult(index=globalSearchIndex){const x=globalSearchItems
 
 /* ---------- Events / keyboard ---------- */
 nav.forEach(b=>b.onclick=()=>b.dataset.view==="quiz"?openQuizHub():setView(b.dataset.view));
-document.getElementById("menuBtn").onclick=()=>sidebar.classList.toggle("open");
+document.getElementById("menuBtn").onclick=()=>{
+  if(window.matchMedia("(max-width:900px)").matches){sidebar.classList.toggle("open");return}
+  S.ui.sidebarCollapsed=!S.ui.sidebarCollapsed;save();
+};
 document.getElementById("globalSearchBtn").onclick=()=>openGlobalSearch();
 document.getElementById("closeSearch").onclick=closeGlobalSearch;
 document.querySelectorAll("[data-close-search]").forEach(x=>x.onclick=closeGlobalSearch);

@@ -263,3 +263,28 @@ html[data-reading-width="wide"] .page{max-width:1380px}
 .cloud-actions .primary:disabled,.cloud-actions .secondary:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:900px){.cloud-account #cloudStatusShort{max-width:95px;overflow:hidden;text-overflow:ellipsis}}
 @media(max-width:620px){.cloud-state-card{grid-template-columns:1fr}.cloud-dialog{margin-top:18px;max-height:calc(100vh - 36px)}.cloud-account{padding:8px}.cloud-account #cloudStatusShort{display:none}}
+
+
+/* ===== Reading Layout V1.2 ===== */
+.menu-btn{display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.page:has(.learn-grid){max-width:1500px}
+.learn-grid.toc-hidden{grid-template-columns:1fr}
+.learn-grid.toc-hidden .toc{display:none}
+.app-shell.sidebar-collapsed{grid-template-columns:72px 1fr}
+.app-shell.sidebar-collapsed .sidebar{padding:22px 10px}
+.app-shell.sidebar-collapsed .brand{justify-content:center;padding:0}
+.app-shell.sidebar-collapsed .brand>div:last-child,
+.app-shell.sidebar-collapsed .nav-btn>span:last-child,
+.app-shell.sidebar-collapsed .sidebar-foot{display:none}
+.app-shell.sidebar-collapsed .nav-btn{grid-template-columns:1fr;justify-items:center;padding:11px 6px}
+.app-shell.sidebar-collapsed .nav-btn>span:first-child{font-size:1.05rem}
+@media(max-width:900px){
+  .app-shell.sidebar-collapsed{grid-template-columns:1fr}
+  .app-shell.sidebar-collapsed .sidebar{padding:22px 16px}
+  .app-shell.sidebar-collapsed .brand{justify-content:flex-start;padding:0 8px}
+  .app-shell.sidebar-collapsed .brand>div:last-child,
+  .app-shell.sidebar-collapsed .nav-btn>span:last-child,
+  .app-shell.sidebar-collapsed .sidebar-foot{display:block}
+  .app-shell.sidebar-collapsed .nav-btn{grid-template-columns:28px 1fr;justify-items:stretch;padding:10px 11px}
+  .learn-grid.toc-hidden .toc{display:none}
+}
